@@ -225,7 +225,12 @@ enet_socket_listen (ENetSocket socket, int backlog)
 ENetSocket
 enet_socket_create (int af, ENetSocketType type)
 {
-    return socket (af, type == ENET_SOCKET_TYPE_DATAGRAM ? SOCK_DGRAM : SOCK_STREAM, 0);
+    int sock_flags = 0;
+#if defined(__EMSCRIPTEN__)
+    // Workaround - cannot set created socket to non blocking mode
+    sock_flags = SOCK_NONBLOCK;
+#endif
+    return socket (af, (type == ENET_SOCKET_TYPE_DATAGRAM ? SOCK_DGRAM : SOCK_STREAM) | sock_flags, 0);
 }
 
 int
@@ -235,10 +240,12 @@ enet_socket_set_option (ENetSocket socket, ENetSocketOption option, int value)
     switch (option)
     {
         case ENET_SOCKOPT_NONBLOCK:
+#if !defined(__EMSCRIPTEN__)
 #ifdef HAS_FCNTL
             result = fcntl (socket, F_SETFL, (value ? O_NONBLOCK : 0) | (fcntl (socket, F_GETFL) & ~O_NONBLOCK));
 #else
             result = ioctl (socket, FIONBIO, & value);
+#endif
 #endif
             break;
 
@@ -406,7 +413,14 @@ enet_socket_send (ENetSocket socket,
     
     if (sentLength == -1)
     {
+#if defined(__EMSCRIPTEN__)
+// Temporary workaround - with newer Emscripten, errno codes are not
+// compatible with POSIX ones
+// TODO(j.gajownik2) Define mapping errno mapping WASI -> POSIX
+       if (errno == __WASI_ERRNO_AGAIN)
+#else
        if (errno == EWOULDBLOCK)
+#endif
          return 0;
 
        return -1;
@@ -432,7 +446,14 @@ enet_socket_receive (ENetSocket socket,
     
     if (recvLength == -1)
     {
+#if defined(__EMSCRIPTEN__)
+// Temporary workaround - with newer Emscripten, errno codes are not
+// compatible with POSIX ones
+// TODO(j.gajownik2) Define mapping errno mapping WASI -> POSIX
+       if (errno == __WASI_ERRNO_AGAIN)
+#else
        if (errno == EWOULDBLOCK)
+#endif
          return 0;
      
        return -1;
@@ -457,7 +478,14 @@ enet_socket_receive (ENetSocket socket,
 
     if (recvLength == -1)
     {
+#if defined(__EMSCRIPTEN__)
+// Temporary workaround - with newer Emscripten, errno codes are not
+// compatible with POSIX ones
+// TODO(j.gajownik2) Define mapping errno mapping WASI -> POSIX
+       if (errno == __WASI_ERRNO_AGAIN)
+#else
        if (errno == EWOULDBLOCK)
+#endif
          return 0;
 
        return -1;
