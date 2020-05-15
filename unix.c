@@ -7,7 +7,6 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
-#include <sys/ioctl.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
@@ -20,7 +19,7 @@
 #define ENET_BUILDING_LIB 1
 #include "enet/enet.h"
 
-#ifdef __APPLE__
+#if defined(__APPLE__)
 #ifdef HAS_POLL
 #undef HAS_POLL
 #endif
@@ -45,10 +44,46 @@
 #ifndef HAS_GETNAMEINFO
 #define HAS_GETNAMEINFO 1
 #endif
+#elif defined(__vita__)
+#ifdef HAS_POLL
+#undef HAS_POLL
+#endif
+#ifdef HAS_FCNTL
+#undef HAS_FCNTL
+#endif
+#ifdef HAS_IOCTL
+#undef HAS_IOCTL
+#endif
+#ifndef HAS_INET_PTON
+#define HAS_INET_PTON 1
+#endif
+#ifndef HAS_INET_NTOP
+#define HAS_INET_NTOP 1
+#endif
+#ifdef HAS_MSGHDR_FLAGS
+#undef HAS_MSGHDR_FLAGS
+#endif
+#ifndef HAS_SOCKLEN_T
+#define HAS_SOCKLEN_T 1
+#endif
+#ifndef HAS_GETADDRINFO
+#define HAS_GETADDRINFO 1
+#endif
+#ifndef HAS_GETNAMEINFO
+#define HAS_GETNAMEINFO 1
+#endif
+#else
+#ifndef HAS_IOCTL
+#define HAS_IOCTL 1
+#endif
 #endif
 
 #ifdef HAS_FCNTL
 #include <fcntl.h>
+#endif
+
+#ifdef HAS_IOCTL
+#include <sys/ioctl.h>
 #endif
 
 #ifdef HAS_POLL
@@ -57,6 +92,10 @@
 
 #ifndef HAS_SOCKLEN_T
 typedef int socklen_t;
+#endif
+
+#ifndef SOMAXCONN
+#define SOMAXCONN 128
 #endif
 
 #ifndef MSG_NOSIGNAL
@@ -244,7 +283,11 @@ enet_socket_set_option (ENetSocket socket, ENetSocketOption option, int value)
 #ifdef HAS_FCNTL
             result = fcntl (socket, F_SETFL, (value ? O_NONBLOCK : 0) | (fcntl (socket, F_GETFL) & ~O_NONBLOCK));
 #else
+#ifdef HAS_IOCTL
             result = ioctl (socket, FIONBIO, & value);
+#else
+            result = setsockopt (socket, SOL_SOCKET, SO_NONBLOCK, (char *) & value, sizeof(int));
+#endif
 #endif
 #endif
             break;
@@ -281,6 +324,30 @@ enet_socket_set_option (ENetSocket socket, ENetSocketOption option, int value)
 
         case ENET_SOCKOPT_NODELAY:
             result = setsockopt (socket, IPPROTO_TCP, TCP_NODELAY, (char *) & value, sizeof (int));
+            break;
+
+        case ENET_SOCKOPT_QOS:
+#ifdef SO_NET_SERVICE_TYPE
+            // iOS/macOS
+            value = value ? NET_SERVICE_TYPE_VO : NET_SERVICE_TYPE_BE;
+            result = setsockopt (socket, SOL_SOCKET, SO_NET_SERVICE_TYPE, (char *) & value, sizeof (int));
+#else
+#ifdef IP_TOS
+            // UNIX - IPv4
+            value = value ? 46 << 2 : 0; // DSCP: Expedited Forwarding
+            result = setsockopt (socket, IPPROTO_IP, IP_TOS, (char *) & value, sizeof (int));
+#endif
+#ifdef IPV6_TCLASS
+            // UNIX - IPv6
+            value = value ? 46 << 2: 0; // DSCP: Expedited Forwarding
+            result = setsockopt (socket, IPPROTO_IPV6, IPV6_TCLASS, (char *) & value, sizeof (int));
+#endif
+#ifdef SO_PRIORITY
+            // Linux
+            value = value ? 6 : 0; // Max priority without NET_CAP_ADMIN
+            result = setsockopt (socket, SOL_SOCKET, SO_PRIORITY, (char *) & value, sizeof (int));
+#endif
+#endif /* SO_NET_SERVICE_TYPE */
             break;
 
         default:
